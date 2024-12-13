@@ -1,5 +1,13 @@
 # How To
 
+<div align="center">
+    
+![Demo Dark Theme](./assets/demo_dark.svg)
+
+![Demo Light Theme](./assets/demo_light.svg)
+
+</div>
+
 Step by step to do the tasks you gotta do for when you're tired of thinking 😉.
 
 > [!NOTE]
