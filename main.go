@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/styles"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 )
 
 const (
@@ -62,6 +64,13 @@ Prepare a Simple Vegetable Garden
 </example2>
 
 Task Input: """ %s """`
+
+type colorScheme uint8
+
+const (
+	Light colorScheme = iota
+	Dark
+)
 
 type llm interface {
 	magic(string) (string, error)
@@ -135,6 +144,39 @@ func printFileErr() {
 	os.Exit(1)
 }
 
+func getUserPrefferedColorScheme() (colorScheme, error) {
+	cmd := exec.Command(
+		"busctl",
+		"--user",
+		"call",
+		"org.freedesktop.portal.Desktop",
+		"/org/freedesktop/portal/desktop",
+		"org.freedesktop.portal.Settings",
+		"Read",
+		"ss",
+		"org.freedesktop.appearance",
+		"color-scheme",
+	)
+
+	result, err := cmd.Output()
+	if err != nil {
+		return Light, err
+	}
+
+	if len(result) < 2 {
+		return Light, fmt.Errorf("Can't read user preferred color scheme")
+	}
+
+	switch result[len(result)-2] {
+	case '0', '2':
+		return Light, nil
+	case '1':
+		return Dark, nil
+	}
+
+	return Light, nil
+}
+
 func getSteps(model llm, message string) string {
 	steps, err := model.magic(fmt.Sprintf(prompt, message))
 	if err != nil {
@@ -164,7 +206,17 @@ func main() {
 			apiToken: apiToken,
 		}, os.Args[1])
 
-		out, _ := glamour.Render(steps, styles.LightStyle)
+		cs, _ := getUserPrefferedColorScheme()
+
+		var style string
+		switch cs {
+		case Light:
+			style = styles.LightStyle
+		case Dark:
+			style = styles.DarkStyle
+		}
+
+		out, _ := glamour.Render(steps, style)
 		out = strings.TrimSpace(out)
 		fmt.Printf("\n%s\n\n", out)
 	case 3:
