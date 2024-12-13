@@ -1,4 +1,4 @@
-module github.com/ed-henrique/how-to-job
+module github.com/ed-henrique/howto
 
 go 1.23.3
 
