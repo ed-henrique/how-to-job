@@ -2,6 +2,9 @@
 
 Step by step to do the tasks you gotta do for when you're tired of thinking 😉.
 
+> [!NOTE]
+> Currently only working on Linux.
+
 ## Steps
 
 1. Install with `go install github.com/ed-henrique/howto`
