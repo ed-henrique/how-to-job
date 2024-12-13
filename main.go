@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,14 @@ import (
 const (
 	openAIAPI = "https://api.openai.com/v1/chat/completions"
 )
+
+const helpMessage = `howto <message>
+
+Commands:
+
+howto --help             Prints this page
+howto api <your-api-key> Sets your API key
+`
 
 const prompt = `You are an expert assistant capable of providing detailed and actionable advice. Your goal is to determine the most effective way to accomplish a given task with clear instructions that MUST be between 3 and 10 steps.
 
@@ -64,6 +73,15 @@ Prepare a Simple Vegetable Garden
 </example2>
 
 Task Input: """ %s """`
+
+var (
+	errArgsCount               = errors.New("No operation found with this amount of args.")
+	errLLMAPI                  = errors.New("There was a problem with the LLM API while generating your response.")
+	errReadAPIKey              = errors.New("No API key could be read, use howto api <your-api-key>.")
+	errSetAPIKey               = errors.New("Could not set the API key.")
+	errUnknownCommand          = errors.New("This command does not exist, use howto --help.")
+	errGetPreferredColorScheme = errors.New("Could not get the user's preferred color scheme.")
+)
 
 type colorScheme uint8
 
@@ -129,18 +147,8 @@ func (m gpt) magic(message string) (string, error) {
 	return resContent.Choices[0].Message.Content, nil
 }
 
-func printArgsErr() {
-	fmt.Fprintf(os.Stderr, "Ok, I gotta tell you how to do your job:\nhow-to-job <message>\nhow-to-job api <token>\n")
-	os.Exit(1)
-}
-
-func printLLMErr() {
-	fmt.Fprintf(os.Stderr, "Something went wrong with LLM stuff\n")
-	os.Exit(1)
-}
-
-func printFileErr() {
-	fmt.Fprintf(os.Stderr, "Something went wrong with saving your API key\n")
+func printErr(err error) {
+	fmt.Fprintf(os.Stderr, err.Error())
 	os.Exit(1)
 }
 
@@ -160,11 +168,11 @@ func getUserPrefferedColorScheme() (colorScheme, error) {
 
 	result, err := cmd.Output()
 	if err != nil {
-		return Light, err
+		return Light, errGetPreferredColorScheme
 	}
 
 	if len(result) < 2 {
-		return Light, fmt.Errorf("Can't read user preferred color scheme")
+		return Light, errGetPreferredColorScheme
 	}
 
 	switch result[len(result)-2] {
@@ -180,15 +188,19 @@ func getUserPrefferedColorScheme() (colorScheme, error) {
 func getSteps(model llm, message string) string {
 	steps, err := model.magic(fmt.Sprintf(prompt, message))
 	if err != nil {
-		printLLMErr()
+		printErr(errLLMAPI)
 		return ""
 	}
 
+	// Removes leading and trailing new line characters
 	steps = strings.TrimSpace(steps)
+
+	// Bolds the answer if the LLM is sorry, to express how sorry it is
 	if strings.HasPrefix(steps, "I'm sorry") {
 		return fmt.Sprintf("**%s**", steps)
 	}
 
+	// Saves some tokens by prepending the title and the subtitle
 	return "# How To " + strings.Replace(steps, "1.", "## Steps\n\n1.", 1)
 }
 
@@ -198,43 +210,72 @@ func main() {
 	args := os.Args
 	switch len(args) {
 	case 2:
-		homeDir, _ := os.UserHomeDir()
-		apiTokenRaw, _ := os.ReadFile(homeDir + "/.config/howto/api.txt")
-		apiToken = string(apiTokenRaw)
+		switch os.Args[1] {
+		case "--help":
+			fmt.Fprint(os.Stdin, helpMessage)
+		default:
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				printErr(errReadAPIKey)
+			}
 
-		steps := getSteps(gpt{
-			apiToken: apiToken,
-		}, os.Args[1])
+			apiTokenRaw, err := os.ReadFile(homeDir + "/.config/howto/api.txt")
+			if err != nil {
+				printErr(errReadAPIKey)
+			}
 
-		cs, _ := getUserPrefferedColorScheme()
+			apiToken = string(apiTokenRaw)
 
-		var style string
-		switch cs {
-		case Light:
-			style = styles.LightStyle
-		case Dark:
-			style = styles.DarkStyle
+			steps := getSteps(gpt{
+				apiToken: apiToken,
+			}, os.Args[1])
+
+			cs, err := getUserPrefferedColorScheme()
+			if err != nil {
+				// TODO: Show a message to the user alerting that the color scheme might be wrong
+			}
+
+			var style string
+			switch cs {
+			case Light:
+				style = styles.LightStyle
+			case Dark:
+				style = styles.DarkStyle
+			}
+
+			out, err := glamour.Render(steps, style)
+			if err != nil {
+				// TODO: Show a message explaining why the output might look so ugly
+				out = strings.TrimSpace(steps)
+				fmt.Printf("\n%s\n\n", steps)
+				return
+			}
+
+			out = strings.TrimSpace(out)
+			fmt.Printf("\n%s\n\n", out)
 		}
-
-		out, _ := glamour.Render(steps, style)
-		out = strings.TrimSpace(out)
-		fmt.Printf("\n%s\n\n", out)
 	case 3:
 		if os.Args[1] != "api" {
-			printArgsErr()
+			printErr(errUnknownCommand)
 		}
 
-		homeDir, _ := os.UserHomeDir()
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			printErr(errSetAPIKey)
+		}
 
 		if homeDir != "" {
-			_ = os.MkdirAll(homeDir+"/.config/howto", 0750)
+			err = os.MkdirAll(homeDir+"/.config/howto", 0750)
+			if err != nil {
+				printErr(errSetAPIKey)
+			}
+
 			err := os.WriteFile(homeDir+"/.config/howto/api.txt", []byte(os.Args[2]), 0600)
 			if err != nil {
-				fmt.Println(err)
-				printFileErr()
+				printErr(errSetAPIKey)
 			}
 		}
 	default:
-		printArgsErr()
+		printErr(errArgsCount)
 	}
 }
